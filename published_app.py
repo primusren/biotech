@@ -274,7 +274,7 @@ def _render_screening_reasons(reasons_text):
         # Determine pass/fail
         is_pass = any(kw in criterion.lower() for kw in [
             "qualifying", "bpiq found", "upside", "received",
-            "breakthrough", "orphan", "accelerated", "fast track",
+            "breakthrough", "orphan", "accelerated", "fast track", "applying", "seeking",
         ])
         is_fail = any(kw in criterion.lower() for kw in [
             "no upcoming catalysts", "no original research", "no qualifying",
@@ -289,7 +289,7 @@ def _render_screening_reasons(reasons_text):
             label = "Academic Papers & Evidence"
         elif "Criterion 3" in criterion or "criterion 3" in criterion:
             icon = "🐁"
-            label = "Animal Studies"
+            label = "In Vivo Studies"
         elif "Criterion 4" in criterion or "criterion 4" in criterion:
             icon = "🏥"
             label = "FDA Designation"
@@ -356,30 +356,76 @@ with tab_summary:
     st.subheader("All Screened Stocks")
 
     if data.get("all_screened"):
-        summary_rows = []
-        for s in data["all_screened"]:
-            summary_rows.append({
-                "Ticker": s.get("ticker", ""),
-                "Company": s.get("company", ""),
-                "Exchange": s.get("exchange", ""),
-                "Market Cap": s.get("market_cap", ""),
-                "Lead Asset": s.get("asset_name", "N/A"),
-                "Passed": "Yes" if s.get("meets_criteria") else "No",
-            })
-        df_summary = pd.DataFrame(summary_rows)
+        # ── Split into passed and failed ──
+        passed_stocks = [s for s in data["all_screened"] if s.get("meets_criteria")]
+        failed_stocks = [s for s in data["all_screened"] if not s.get("meets_criteria")]
 
-        # Highlight qualifying rows
-        st.dataframe(
-            df_summary,
-            column_config={
-                "Passed": st.column_config.TextColumn("Passed?", width="small"),
-                "Ticker": st.column_config.TextColumn("Ticker", width="small"),
-                "Exchange": st.column_config.TextColumn("Exch", width="small"),
-                "Market Cap": st.column_config.TextColumn("Mkt Cap", width="small"),
-            },
-            hide_index=True,
-            use_container_width=True,
-        )
+        # ── Passed stocks table ──
+        if passed_stocks:
+            st.markdown("#### ✅ Passed All Criteria")
+            passed_rows = []
+            for s in passed_stocks:
+                passed_rows.append({
+                    "Ticker": s.get("ticker", ""),
+                    "Company": s.get("company", ""),
+                    "Market Cap": s.get("market_cap", ""),
+                    "Drug Candidate": s.get("asset_name", "N/A"),
+                })
+            df_passed = pd.DataFrame(passed_rows)
+            st.dataframe(
+                df_passed,
+                column_config={
+                    "Ticker": st.column_config.TextColumn("Ticker", width="small"),
+                    "Market Cap": st.column_config.TextColumn("Mkt Cap", width="small"),
+                },
+                hide_index=True,
+                use_container_width=True,
+            )
+
+        # ── Failed stocks table (with reasons) ──
+        if failed_stocks:
+            st.markdown("#### ❌ Did Not Pass")
+            for s in failed_stocks:
+                ticker = s.get("ticker", "")
+                company = s.get("company", "")
+                asset = s.get("asset_name", "N/A")
+                mkt_cap = s.get("market_cap", "")
+                reasons_raw = s.get("reasons_summary", "No details available.")
+
+                # Parse reasons into short failure bullets
+                fail_reasons = []
+                for line in reasons_raw.split("\n"):
+                    line = line.strip()
+                    if not line:
+                        continue
+                    # Extract criterion label and detail
+                    if ":" in line:
+                        parts = line.split(":", 1)
+                        label = parts[0].strip()
+                        detail = parts[1].strip()
+                    else:
+                        label = ""
+                        detail = line
+
+                    # Determine pass/fail for this criterion
+                    detail_lower = detail.lower()
+                    is_fail = any(kw in detail_lower for kw in [
+                        "no upcoming", "no original", "no qualifying", "no papers",
+                        "does not have", "below threshold", "limited information",
+                        "no data", "insufficient", "not found", "no catalyst",
+                    ])
+                    if is_fail:
+                        fail_reasons.append(f"**{label}:** {detail}" if label else detail)
+
+                # Build card
+                with st.expander(f"**{company}** ({ticker}) — {asset} | Mkt Cap: {mkt_cap}", expanded=False):
+                    if fail_reasons:
+                        st.markdown("**Failed criteria:**")
+                        for fr in fail_reasons:
+                            st.markdown(f"- {fr}")
+                    else:
+                        # Show full reasons if we couldn't parse specific failures
+                        st.markdown(f"**Screening notes:**\n\n{reasons_raw}")
 
         # Quick stats
         pass_count = sum(1 for s in data["all_screened"] if s.get("meets_criteria"))
